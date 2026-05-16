@@ -125,11 +125,26 @@ export default function App() {
   const [error, setError]       = useState(null);
   const callsRef = useRef(), putsRef = useRef();
 
-  const loadImg = (file) => new Promise((res) => {
-    const r = new FileReader();
-    r.onload = (e) => res({ base64: e.target.result.split(",")[1], mediaType: file.type, name: file.name });
-    r.readAsDataURL(file);
+  const loadImg = (file) => new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1024;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+      URL.revokeObjectURL(url);
+      res({ base64, mediaType: 'image/jpeg', name: file.name });
+    };
+    img.onerror = () => rej(new Error("Image invalide"));
+    img.src = url;
   });
+
 
   const analyze = async () => {
     if (!callsImg && !putsImg) return;
