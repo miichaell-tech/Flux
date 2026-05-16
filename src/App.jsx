@@ -2,81 +2,68 @@ import { useState, useRef } from "react";
 
 const RATIO = 41.35;
 
-const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans l'analyse des options QQQ pour le trading de futures NQ.
+const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans l'analyse des options QQQ pour le trading NQ.
 
-L'utilisateur va t'envoyer une ou deux images (screenshot Barchart ou InsiderFinance) avec les données options QQQ.
+L'utilisateur t'envoie des screenshots de la chaîne d'options QQQ sur Barchart (puts et/ou calls).
 
-Extrait les niveaux suivants si présents (en strikes QQQ) :
-- Call Wall (résistance gamma principale)
-- Put Wall (support gamma principal)
-- Zero Gamma (niveau neutre gamma)
-- Max Pain
-- HVL (High Volatility Level) si disponible
-- GEX Flip si disponible
-- Tout autre niveau clé (support/résistance secondaires)
+Ton travail :
+1. Lire tous les strikes visibles avec leur Open Interest (OI)
+2. Identifier les TOP 3 strikes avec le plus gros OI côté PUTS → ce sont les supports
+3. Identifier les TOP 3 strikes avec le plus gros OI côté CALLS → ce sont les résistances
+4. Retourner ces niveaux en JSON
 
-Réponds UNIQUEMENT en JSON valide, sans markdown, sans backticks, sans texte avant ou après. Format exact :
+Réponds UNIQUEMENT en JSON valide, sans markdown, sans backticks. Format exact :
 {
-  "callWall": 485,
-  "putWall": 475,
-  "zeroGamma": 480,
-  "maxPain": 478,
-  "hvl": null,
-  "gexFlip": null,
-  "secondary": [{"label": "Résistance 2", "value": 488}],
-  "rawDate": "2025-05-15",
+  "date": "2026-05-16",
+  "supports": [
+    {"strike": 712, "oi": 44651, "label": "Support majeur"},
+    {"strike": 710, "oi": 30104, "label": "Support 2"},
+    {"strike": 709, "oi": 19221, "label": "Support 3"}
+  ],
+  "resistances": [
+    {"strike": 715, "oi": 36956, "label": "Résistance majeure"},
+    {"strike": 713, "oi": 25075, "label": "Résistance 2"},
+    {"strike": 710, "oi": 20259, "label": "Résistance 3"}
+  ],
   "notes": ""
 }
 
-Si une valeur est absente, mets null. Ne mets que des nombres pour les strikes QQQ.`;
+Si tu vois seulement les puts, remplis supports. Si seulement calls, remplis resistances. Ne mets que des vrais chiffres lus sur les images.`;
 
-const toNQ = (qqq) => {
-  if (qqq == null || isNaN(qqq)) return null;
-  return Math.round(parseFloat(qqq) * RATIO);
+const toNQ = (strike) => {
+  if (!strike) return null;
+  return Math.round(parseFloat(strike) * RATIO);
 };
 
-const FIELD_DEFS = [
-  { key: "callWall",  label: "CALL WALL",  color: "#f87171", highlight: true  },
-  { key: "zeroGamma", label: "ZERO GAMMA", color: "#fbbf24", highlight: true  },
-  { key: "maxPain",   label: "MAX PAIN",   color: "#a78bfa", highlight: false },
-  { key: "putWall",   label: "PUT WALL",   color: "#34d399", highlight: true  },
-  { key: "hvl",       label: "HVL",        color: "#60a5fa", highlight: false },
-  { key: "gexFlip",   label: "GEX FLIP",   color: "#fb923c", highlight: false },
-];
-
-function LevelRow({ label, qqq, color, highlight }) {
-  if (qqq == null) return null;
-  const val = parseFloat(qqq);
-  if (isNaN(val)) return null;
+function LevelRow({ label, strike, oi, color, highlight }) {
+  if (!strike) return null;
   return (
     <div style={{
-      display: "grid", gridTemplateColumns: "1fr 100px 110px", alignItems: "center",
+      display: "grid", gridTemplateColumns: "1fr 70px 90px 110px", alignItems: "center",
       padding: "10px 16px",
       background: highlight ? `${color}18` : "transparent",
       borderLeft: highlight ? `3px solid ${color}` : "3px solid transparent",
       borderBottom: "1px solid #1a1a2e",
     }}>
-      <span style={{ color: "#8892a4", fontSize: 13, fontFamily: "'Space Mono', monospace" }}>{label}</span>
-      <span style={{ color: "#c0c8d8", fontSize: 14, fontFamily: "'Space Mono', monospace", textAlign: "right" }}>{val.toFixed(1)}</span>
+      <span style={{ color: "#8892a4", fontSize: 12, fontFamily: "'Space Mono', monospace" }}>{label}</span>
+      <span style={{ color: "#c0c8d8", fontSize: 13, fontFamily: "'Space Mono', monospace", textAlign: "right" }}>{strike}</span>
+      <span style={{ color: "#4a5568", fontSize: 11, fontFamily: "'Space Mono', monospace", textAlign: "right" }}>{oi?.toLocaleString()}</span>
       <span style={{ color, fontSize: 15, fontFamily: "'Space Mono', monospace", textAlign: "right", fontWeight: 700 }}>
-        {toNQ(val)?.toLocaleString()}
+        {toNQ(strike)?.toLocaleString()}
       </span>
     </div>
   );
 }
 
-function NQBar({ levels }) {
-  if (!levels) return null;
-  const pts = [levels.callWall, levels.putWall, levels.zeroGamma, levels.maxPain].filter(Boolean);
-  if (pts.length < 2) return null;
-  const min = Math.min(...pts) - 2, max = Math.max(...pts) + 2;
+function NQBar({ supports, resistances }) {
+  const all = [...(supports || []), ...(resistances || [])].map(l => l.strike).filter(Boolean);
+  if (all.length < 2) return null;
+  const min = Math.min(...all) - 2, max = Math.max(...all) + 2;
   const pct = (v) => ((v - min) / (max - min)) * 100;
   const markers = [
-    { v: levels.callWall,  color: "#f87171", label: "CW" },
-    { v: levels.zeroGamma, color: "#fbbf24", label: "ZG" },
-    { v: levels.maxPain,   color: "#a78bfa", label: "MP" },
-    { v: levels.putWall,   color: "#34d399", label: "PW" },
-  ].filter(m => m.v != null);
+    ...(supports || []).map(s => ({ v: s.strike, color: "#34d399", label: "S" })),
+    ...(resistances || []).map(r => ({ v: r.strike, color: "#f87171", label: "R" })),
+  ];
   return (
     <div style={{ padding: "20px 20px 28px", borderBottom: "1px solid #1a1a2e" }}>
       <div style={{ fontSize: 10, color: "#4a5568", marginBottom: 16, letterSpacing: 2 }}>SPECTRE QQQ → NQ</div>
@@ -119,10 +106,10 @@ function ImageSlot({ label, sublabel, color, image, onFile, inputRef }) {
 
 export default function App() {
   const [callsImg, setCallsImg] = useState(null);
-  const [putsImg, setPutsImg]   = useState(null);
-  const [levels, setLevels]     = useState(null);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState(null);
+  const [putsImg, setPutsImg] = useState(null);
+  const [levels, setLevels] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const callsRef = useRef(), putsRef = useRef();
 
   const loadImg = (file) => new Promise((res, rej) => {
@@ -134,8 +121,7 @@ export default function App() {
       let w = img.width, h = img.height;
       if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
       if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-      canvas.width = w;
-      canvas.height = h;
+      canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       const base64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
       URL.revokeObjectURL(url);
@@ -145,7 +131,6 @@ export default function App() {
     img.src = url;
   });
 
-
   const analyze = async () => {
     if (!callsImg && !putsImg) return;
     setLoading(true); setError(null); setLevels(null);
@@ -153,20 +138,19 @@ export default function App() {
       const content = [];
       if (callsImg) {
         content.push({ type: "image", source: { type: "base64", media_type: callsImg.mediaType, data: callsImg.base64 } });
-        content.push({ type: "text", text: "IMAGE CALLS - extrait Call Wall et résistances gamma" });
+        content.push({ type: "text", text: "IMAGE CALLS - identifie les strikes avec le plus gros OI (résistances)" });
       }
       if (putsImg) {
         content.push({ type: "image", source: { type: "base64", media_type: putsImg.mediaType, data: putsImg.base64 } });
-        content.push({ type: "text", text: "IMAGE PUTS - extrait Put Wall et supports gamma" });
+        content.push({ type: "text", text: "IMAGE PUTS - identifie les strikes avec le plus gros OI (supports)" });
       }
-      content.push({ type: "text", text: "Retourne uniquement le JSON avec tous les niveaux QQQ trouvés." });
+      content.push({ type: "text", text: "Retourne le JSON avec les top 3 supports (puts OI max) et top 3 résistances (calls OI max)." });
 
       const resp = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
-
           max_tokens: 1000,
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content }],
@@ -177,7 +161,7 @@ export default function App() {
       if (data.error) throw new Error(JSON.stringify(data.error));
       const text = data.content?.find(b => b.type === "text")?.text || "";
       const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("Pas de JSON dans la réponse");
+      if (!match) throw new Error("Pas de JSON : " + text.slice(0, 100));
       setLevels(JSON.parse(match[0]));
     } catch (e) {
       setError("Erreur : " + e.message);
@@ -192,25 +176,24 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#070710", fontFamily: "'Space Mono',monospace", color: "#e2e8f0", display: "flex", justifyContent: "center", padding: "32px 16px" }}>
       <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet" />
       <div style={{ width: "100%", maxWidth: 560 }}>
+
         <div style={{ marginBottom: 24, textAlign: "center" }}>
           <div style={{ fontSize: 11, letterSpacing: 4, color: "#3b4a6b", marginBottom: 6 }}>FLUX TRADING OPTIONS</div>
           <div style={{ fontFamily: "'Orbitron',sans-serif", fontSize: 22, fontWeight: 900, letterSpacing: 2, background: "linear-gradient(135deg,#60a5fa,#a78bfa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>NQ PRE-SESSION</div>
-          <div style={{ fontSize: 11, color: "#3b4a6b", marginTop: 4, letterSpacing: 2 }}>OPTIONS LEVELS ANALYZER · AI POWERED</div>
+          <div style={{ fontSize: 11, color: "#3b4a6b", marginTop: 4, letterSpacing: 2 }}>OI LEVELS ANALYZER · AI POWERED</div>
         </div>
 
         {!levels && (
           <div style={{ background: "#0d0d1a", border: "1px solid #1a1a2e", borderRadius: 8, overflow: "hidden", marginBottom: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #1a1a2e" }}>
-              <ImageSlot label="IMAGE CALLS" sublabel="Call Wall · Résistances" color="#34d399" image={callsImg}
+              <ImageSlot label="IMAGE CALLS" sublabel="Résistances OI" color="#f87171" image={callsImg}
                 onFile={async (e) => { const f = e.target.files[0]; if (f) setCallsImg(await loadImg(f)); }}
                 inputRef={callsRef} />
-              <ImageSlot label="IMAGE PUTS" sublabel="Put Wall · Supports" color="#f87171" image={putsImg}
+              <ImageSlot label="IMAGE PUTS" sublabel="Supports OI" color="#34d399" image={putsImg}
                 onFile={async (e) => { const f = e.target.files[0]; if (f) setPutsImg(await loadImg(f)); }}
                 inputRef={putsRef} />
             </div>
-            {error && (
-              <div style={{ padding: "10px 16px", background: "#1a0a0a", borderBottom: "1px solid #7f1d1d", color: "#f87171", fontSize: 11 }}>{error}</div>
-            )}
+            {error && <div style={{ padding: "10px 16px", background: "#1a0a0a", borderBottom: "1px solid #7f1d1d", color: "#f87171", fontSize: 11 }}>{error}</div>}
             <div style={{ padding: "12px 16px" }}>
               <button onClick={analyze} disabled={loading || (!callsImg && !putsImg)} style={{
                 width: "100%", padding: "12px",
@@ -231,38 +214,52 @@ export default function App() {
             <div style={{ padding: "12px 16px", borderBottom: "1px solid #1a1a2e", display: "flex", justifyContent: "space-between", background: "#090915" }}>
               <div>
                 <div style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2 }}>SESSION</div>
-                <div style={{ fontSize: 13, color: "#60a5fa", marginTop: 2 }}>{levels.rawDate || new Date().toLocaleDateString("fr-FR")}</div>
+                <div style={{ fontSize: 13, color: "#60a5fa", marginTop: 2 }}>{levels.date || new Date().toLocaleDateString("fr-FR")}</div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2 }}>RATIO QQQ→NQ</div>
                 <div style={{ fontSize: 13, color: "#a78bfa", marginTop: 2 }}>{RATIO}</div>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 110px", padding: "8px 16px", borderBottom: "1px solid #1a1a2e", background: "#080812" }}>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 90px 110px", padding: "8px 16px", borderBottom: "1px solid #1a1a2e", background: "#080812" }}>
               <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2 }}>NIVEAU</span>
-              <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2, textAlign: "right" }}>QQQ $</span>
+              <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2, textAlign: "right" }}>STRIKE</span>
+              <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2, textAlign: "right" }}>OI</span>
               <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2, textAlign: "right" }}>NQ pts</span>
             </div>
-            {FIELD_DEFS.map(({ key, label, color, highlight }) => (
-              <LevelRow key={key} label={label} qqq={levels[key]} color={color} highlight={highlight} />
-            ))}
-            {levels.secondary?.length > 0 && (
+
+            {levels.resistances?.length > 0 && (
               <>
-                <div style={{ padding: "8px 16px", background: "#080812", borderBottom: "1px solid #1a1a2e" }}>
-                  <span style={{ fontSize: 10, color: "#2d3748", letterSpacing: 2 }}>NIVEAUX SECONDAIRES</span>
+                <div style={{ padding: "8px 16px", background: "#1a0808", borderBottom: "1px solid #1a1a2e" }}>
+                  <span style={{ fontSize: 10, color: "#f87171", letterSpacing: 2 }}>▲ RÉSISTANCES (CALLS)</span>
                 </div>
-                {levels.secondary.map((sec, i) => (
-                  <LevelRow key={i} label={sec.label} qqq={sec.value} color="#64748b" highlight={false} />
+                {levels.resistances.map((r, i) => (
+                  <LevelRow key={i} label={r.label} strike={r.strike} oi={r.oi} color="#f87171" highlight={i === 0} />
                 ))}
               </>
             )}
-            <NQBar levels={levels} />
+
+            {levels.supports?.length > 0 && (
+              <>
+                <div style={{ padding: "8px 16px", background: "#081a0a", borderBottom: "1px solid #1a1a2e" }}>
+                  <span style={{ fontSize: 10, color: "#34d399", letterSpacing: 2 }}>▼ SUPPORTS (PUTS)</span>
+                </div>
+                {levels.supports.map((s, i) => (
+                  <LevelRow key={i} label={s.label} strike={s.strike} oi={s.oi} color="#34d399" highlight={i === 0} />
+                ))}
+              </>
+            )}
+
+            <NQBar supports={levels.supports} resistances={levels.resistances} />
+
             {levels.notes && (
               <div style={{ padding: "10px 16px", borderTop: "1px solid #1a1a2e" }}>
                 <span style={{ fontSize: 11, color: "#4a5568" }}>NOTE: </span>
                 <span style={{ fontSize: 11, color: "#64748b" }}>{levels.notes}</span>
               </div>
             )}
+
             <div style={{ padding: "12px 16px", borderTop: "1px solid #1a1a2e" }}>
               <button onClick={reset} style={{
                 width: "100%", padding: "10px", background: "transparent",
