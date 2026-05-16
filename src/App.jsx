@@ -158,7 +158,7 @@ export default function App() {
       });
 
       const data = await resp.json();
-      if (data.error) throw new Error(data.error.message || data.error);
+      if (data.error) throw new Error(JSON.stringify(data.error));
       const text = data.content?.find(b => b.type === "text")?.text || "";
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("Pas de JSON dans la réponse");
